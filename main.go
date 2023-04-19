@@ -84,7 +84,6 @@ type Oracle struct {
 	Region       string `ini:"region"`
 	Key_file     string `ini:"key_file"`
 	Key_password string `ini:"key_password"`
-	Compartment  string `ini:"compartment"`
 }
 
 type Instance struct {
