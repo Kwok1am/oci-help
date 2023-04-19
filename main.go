@@ -1,24 +1,24 @@
 /*
-  甲骨文云API文档
-  https://docs.oracle.com/en-us/iaas/api/#/en/iaas/20160918/
+甲骨文云API文档
+https://docs.oracle.com/en-us/iaas/api/#/en/iaas/20160918/
 
-  实例:
-  https://docs.oracle.com/en-us/iaas/api/#/en/iaas/20160918/Instance/
-  VCN:
-  https://docs.oracle.com/en-us/iaas/api/#/en/iaas/20160918/Vcn/
-  Subnet:
-  https://docs.oracle.com/en-us/iaas/api/#/en/iaas/20160918/Subnet/
-  VNIC:
-  https://docs.oracle.com/en-us/iaas/api/#/en/iaas/20160918/Vnic/
-  VnicAttachment:
-  https://docs.oracle.com/en-us/iaas/api/#/en/iaas/20160918/VnicAttachment/
-  私有IP
-  https://docs.oracle.com/en-us/iaas/api/#/en/iaas/20160918/PrivateIp/
-  公共IP
-  https://docs.oracle.com/en-us/iaas/api/#/en/iaas/20160918/PublicIp/
+实例:
+https://docs.oracle.com/en-us/iaas/api/#/en/iaas/20160918/Instance/
+VCN:
+https://docs.oracle.com/en-us/iaas/api/#/en/iaas/20160918/Vcn/
+Subnet:
+https://docs.oracle.com/en-us/iaas/api/#/en/iaas/20160918/Subnet/
+VNIC:
+https://docs.oracle.com/en-us/iaas/api/#/en/iaas/20160918/Vnic/
+VnicAttachment:
+https://docs.oracle.com/en-us/iaas/api/#/en/iaas/20160918/VnicAttachment/
+私有IP
+https://docs.oracle.com/en-us/iaas/api/#/en/iaas/20160918/PrivateIp/
+公共IP
+https://docs.oracle.com/en-us/iaas/api/#/en/iaas/20160918/PublicIp/
 
-  获取可用性域
-  https://docs.oracle.com/en-us/iaas/api/#/en/identity/20160918/AvailabilityDomain/ListAvailabilityDomains
+获取可用性域
+https://docs.oracle.com/en-us/iaas/api/#/en/identity/20160918/AvailabilityDomain/ListAvailabilityDomains
 */
 package main
 
@@ -84,6 +84,7 @@ type Oracle struct {
 	Region       string `ini:"region"`
 	Key_file     string `ini:"key_file"`
 	Key_password string `ini:"key_password"`
+	Compartment  string `ini:"compartment"`
 }
 
 type Instance struct {
@@ -466,9 +467,11 @@ func instanceDetails(instanceId *string) {
 		fmt.Printf("公共IP: %s\n", strPublicIps)
 		fmt.Printf("可用性域: %s\n", *instance.AvailabilityDomain)
 		fmt.Printf("配置: %s\n", *instance.Shape)
+		fmt.Printf("CPU型号: %s\n", *instance.ShapeConfig.ProcessorDescription)
 		fmt.Printf("OCPU计数: %g\n", *instance.ShapeConfig.Ocpus)
 		fmt.Printf("网络带宽(Gbps): %g\n", *instance.ShapeConfig.NetworkingBandwidthInGbps)
 		fmt.Printf("内存(GB): %g\n", *instance.ShapeConfig.MemoryInGBs)
+		fmt.Printf("VNIC名称: %s,%s\n", *vnics[0].DisplayName, *vnics[0].Id)
 		fmt.Println("--------------------")
 		fmt.Printf("\n\033[1;32m1: %s   2: %s   3: %s   4: %s   5: %s\033[0m\n", "启动", "停止", "重启", "终止", "更换公共IP")
 		var input string
@@ -523,11 +526,27 @@ func instanceDetails(instanceId *string) {
 				fmt.Printf("\033[1;31m实例已终止或获取实例VNIC失败，请稍后重试.\033[0m\n")
 				break
 			}
+			// 判断vnic的数量，如果大于1，则选取指定的nvic进行更换公共IP
+			selectedVnicIndex := 0
+			if len(vnics) > 1 {
+				fmt.Println("\033[1;32m发现多个VNIC:\033[0m")
+				for i, vnic := range vnics {
+					fmt.Printf("\033[1;32m%d: \033[0mVNIC ID: %s\n", i+1, *vnic.Id)
+				}
+				fmt.Print("\n请输入需要更换公共IP的VNIC序号: ")
+				fmt.Scanln(&selectedVnicIndex)
+				if selectedVnicIndex <= 0 || selectedVnicIndex > len(vnics) {
+					fmt.Printf("\033[1;31m输入的序号无效，请重新输入.\033[0m\n")
+					break
+				}
+				selectedVnicIndex-- // 调整为切片索引
+			}
+			// 如果只有一个vnic，则直接更换实例的公共IP
 			fmt.Printf("将删除当前公共IP并创建一个新的公共IP。确定更换实例公共IP？(输入 y 并回车): ")
 			var input string
 			fmt.Scanln(&input)
 			if strings.EqualFold(input, "y") {
-				publicIp, err := changePublicIp(vnics)
+				publicIp, err := changePublicIp(vnics[selectedVnicIndex])
 				if err != nil {
 					fmt.Printf("\033[1;31m更换实例公共IP失败.\033[0m %s\n", err.Error())
 				} else {
@@ -1917,13 +1936,7 @@ func instanceAction(instanceId *string, action core.InstanceActionActionEnum) (i
 	return
 }
 
-func changePublicIp(vnics []core.Vnic) (publicIp core.PublicIp, err error) {
-	var vnic core.Vnic
-	for _, v := range vnics {
-		if *v.IsPrimary {
-			vnic = v
-		}
-	}
+func changePublicIp(vnic core.Vnic) (publicIp core.PublicIp, err error) {
 	fmt.Println("正在获取私有IP...")
 	var privateIps []core.PrivateIp
 	privateIps, err = getPrivateIps(vnic.Id)
